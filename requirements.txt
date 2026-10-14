@@ -1,0 +1,5 @@
+# 开发机（Windows）与香橙派（RK3588，真机阶段另装 rknn-toolkit2）共用
+numpy>=1.26
+opencv-python>=4.8
+PyYAML>=6.0
+pytest>=8.0

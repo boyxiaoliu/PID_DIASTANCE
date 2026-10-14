@@ -1,0 +1,22 @@
+# ==== 数据文件一律不入库 ====
+# 图像/视频/大文件只走本地路径引用（见 README「数据路径」节）
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.mp4
+*.stcm
+
+# ==== Python ====
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# ==== 工具运行输出 ====
+# 大图等临时产物写 runs/（不入库）；实验小件（metrics.csv、trace.json）放 experiments/（入库）
+runs/
+
+# ==== 系统杂项 ====
+Thumbs.db
+.DS_Store

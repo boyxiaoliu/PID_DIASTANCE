@@ -1,0 +1,7 @@
+# 两台 Windows 机器协作，统一换行符防止无意义 diff
+* text=auto
+*.py text
+*.yaml text
+*.md text
+*.csv text
+*.jpg binary
