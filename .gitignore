@@ -20,3 +20,6 @@ runs/
 # ==== 系统杂项 ====
 Thumbs.db
 .DS_Store
+
+# ==== ZCode 会话产物 ====
+.zcode/
