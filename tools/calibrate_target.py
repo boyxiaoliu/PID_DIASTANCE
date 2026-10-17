@@ -85,7 +85,12 @@ def main():
             if img is None:
                 row["reject"] = "image_missing"
             elif fit is None:
-                row["reject"] = "not_found"
+                # 蓝线贴近画面底(书可见但横杆带基本出画)的"未检出"也归入饱和态
+                sf = spine_bottom / 2160.0 if spine_bottom else 0.0   # TODO(calib) 2160=4K实测高
+                if sf >= 0.95:
+                    row["reject"] = "saturated_not_found(按1.0计)"
+                else:
+                    row["reject"] = "not_found"
             else:
                 row.update(found=1, bar_y=f"{fit.y_center:.1f}",
                            bar_frac=f"{fit.y_center / img.shape[0]:.4f}",
@@ -97,11 +102,11 @@ def main():
                 elif abs(fit.slope_deg) > slope_max:
                     row["reject"] = f"slope>{slope_max}deg"
                 elif spine_bottom is not None:
-                    # G1 用户目检发现的"黄蓝重合"态：横杆下沿出画、程序锁到上沿，
-                    # 读数不可信且物理含义 = 太近（闭环里触发后退，绝不前进）
+                    # 标度规则（G1 用户提出）：黄线锁到上沿(与蓝线重合) = 横杆下沿已出画
+                    # = 太近 → 读数按饱和值 1.0 计（闭环里=后退），标定不采用
                     gap = fit.y_center / img.shape[0] - spine_bottom / img.shape[0]
                     if gap < gap_min:
-                        row["reject"] = f"bar_top_suspect(间距{gap:.3f}<{gap_min})"
+                        row["reject"] = f"saturated_too_close(按1.0计,间距{gap:.3f})"
             rows.append(row)
 
         # overlay：样例 + 稍后按指标挑选的（先存样例，其余跑完统一挑）
@@ -140,14 +145,15 @@ def main():
         w.writerows(rows)
 
     # ---- 摘要 ----
-    n_ok, n_roll, n_nf, n_inl, n_slope = (sum(1 for r in rows if c(r)) for c in (
+    n_ok, n_roll, n_nf, n_inl, n_slope, n_sat = (sum(1 for r in rows if c(r)) for c in (
         lambda r: r["found"] and not r["reject"],
         lambda r: r["reject"].startswith("roll"),
         lambda r: r["reject"] == "not_found",
         lambda r: r["reject"].startswith("inliers"),
-        lambda r: r["reject"].startswith("slope")))
+        lambda r: r["reject"].startswith("slope"),
+        lambda r: r["reject"].startswith("saturated")))
     print(f"\n=== cam_{args.cam} 横杆检测 + 体检摘要 ===")
-    print(f"总数 {len(rows)} | 幸存 {n_ok} | 剔除: roll {n_roll} / 未检出 {n_nf} / 内点率 {n_inl} / 斜度 {n_slope}")
+    print(f"总数 {len(rows)} | 幸存 {n_ok} | 饱和(太近,按1.0计) {n_sat} | 剔除: roll {n_roll} / 真未检出 {n_nf} / 内点率 {n_inl} / 斜度 {n_slope}")
 
     def pct(v, ps=(5, 25, 50, 75, 90, 95)):
         a = np.percentile(v, ps)
