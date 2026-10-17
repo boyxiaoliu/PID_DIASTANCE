@@ -6,6 +6,8 @@
 
 import os
 
+import cv2
+import numpy as np
 import yaml
 
 #: 项目根 = src/pid_servo 的上两级
@@ -13,6 +15,23 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 
 #: 默认配置文件路径
 DEFAULT_CONFIG = os.path.join(PROJECT_ROOT, "configs", "default.yaml")
+
+
+def imread_utf8(path, flags=cv2.IMREAD_COLOR):
+    """读图，兼容中文路径（cv2.imread 在 Windows 上碰非 ASCII 路径会静默返回 None）"""
+    data = np.fromfile(path, dtype=np.uint8)
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, flags)
+
+
+def imwrite_utf8(path, img, params=None):
+    """写图，兼容中文路径（原理同 imread_utf8）"""
+    ext = os.path.splitext(path)[1] or ".png"
+    ok, buf = cv2.imencode(ext, img, params or [])
+    if ok:
+        buf.tofile(path)
+    return ok
 
 
 def load(path=None):

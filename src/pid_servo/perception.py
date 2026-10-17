@@ -124,6 +124,34 @@ def _pick_peak(hp, lo, hi, min_contrast, rel_threshold, pick="bottommost"):
     return lo + _subpixel(seg, k)
 
 
+def _ransac_line(P, tol, iters=500, seed=0):
+    """RANSAC 直线拟合：找支持点最多的一条边（点云混有多种边时锁定主导边）
+
+    背景：横杆下方沿宽度方向混有 横杆顶边/标签牌底边/立柱 等多种结构，
+    M-estimator(HUBER) 会被少数派拉偏 —— S1 真图实验（097 内点率仅 45%）驱动的升级。
+    固定种子保证批次可复现。
+
+    :return: (k, b, inlier_mask)  最小二乘重拟合后的直线与内点掩码
+    """
+    rng = np.random.default_rng(seed)
+    n = len(P)
+    best_mask, best_k, best_b = None, 0.0, 0.0
+    for _ in range(iters):
+        i, j = rng.choice(n, 2, replace=False)
+        dx = P[j, 0] - P[i, 0]
+        if abs(dx) < 1e-3:
+            continue
+        k = (P[j, 1] - P[i, 1]) / dx
+        b = P[i, 1] - k * P[i, 0]
+        mask = np.abs(P[:, 1] - (k * P[:, 0] + b)) <= tol
+        if best_mask is None or mask.sum() > best_mask.sum():
+            best_mask, best_k, best_b = mask, k, b
+    Q = P[best_mask]
+    best_k, best_b = np.polyfit(Q[:, 0], Q[:, 1], 1)
+    best_mask = np.abs(P[:, 1] - (best_k * P[:, 0] + best_b)) <= tol
+    return float(best_k), float(best_b), best_mask
+
+
 # ========== 横杆检测器 ==========
 
 @dataclass
@@ -166,6 +194,7 @@ class BarDetector:
         self.pick = cfg.get("pick", "bottommost")
         self.min_points = int(cfg.get("min_points", 8))
         self.inlier_tol_px = float(cfg.get("inlier_tol_px", 12.0))
+        self.fit_method = cfg.get("fit", "ransac")   # ransac=锁主导边 / huber=M-estimator
 
     @classmethod
     def from_config(cls, path=None):
@@ -207,16 +236,18 @@ class BarDetector:
         if len(pts) < self.min_points:
             return None
 
-        # M-estimator 稳健直线拟合（DIST_HUBER 压制锁错边/遮挡的离群点）
+        # 稳健直线拟合：RANSAC 锁主导边（真图上横杆下方混有多种边，S1 实验定）
         P = np.asarray(pts, dtype=np.float32)
-        vx, vy, px, py = cv2.fitLine(P, cv2.DIST_HUBER, 0, 0.01, 0.01).ravel()
-        if abs(vx) < 1e-6:
-            return None          # 近垂直不可能是横杆
-        k = float(vy / vx)
-        y_center = float(py + k * (w / 2.0 - px))
-        b = float(py - k * px)
+        if self.fit_method == "ransac":
+            k, b, inliers = _ransac_line(P, self.inlier_tol_px)
+        else:
+            vx, vy, px, py = cv2.fitLine(P, cv2.DIST_HUBER, 0, 0.01, 0.01).ravel()
+            if abs(vx) < 1e-6:
+                return None      # 近垂直不可能是横杆
+            k, b = float(vy / vx), float(py - k * px)
+            inliers = np.abs(P[:, 1] - (k * P[:, 0] + b)) <= self.inlier_tol_px
+        y_center = float(k * (w / 2.0) + b)
         res = np.abs(P[:, 1] - (k * P[:, 0] + b))
-        inliers = res <= self.inlier_tol_px
 
         return BarFit(
             y_center=y_center,
