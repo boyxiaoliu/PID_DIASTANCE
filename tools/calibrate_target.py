@@ -64,6 +64,7 @@ def main():
     min_inlier = float(utils.get(cfg, "health.min_inlier_ratio", 0.70))
     slope_max = args.slope_max if args.slope_max is not None else float(
         utils.get(cfg, "health.slope_abs_max_deg", 6.0))
+    gap_min = float(utils.get(cfg, "health.gap_min_frac", 0.015))
 
     out_dir = args.out or os.path.join("runs", "s1_bar")
     os.makedirs(out_dir, exist_ok=True)
@@ -95,6 +96,12 @@ def main():
                     row["reject"] = f"inliers<{min_inlier}"
                 elif abs(fit.slope_deg) > slope_max:
                     row["reject"] = f"slope>{slope_max}deg"
+                elif spine_bottom is not None:
+                    # G1 用户目检发现的"黄蓝重合"态：横杆下沿出画、程序锁到上沿，
+                    # 读数不可信且物理含义 = 太近（闭环里触发后退，绝不前进）
+                    gap = fit.y_center / img.shape[0] - spine_bottom / img.shape[0]
+                    if gap < gap_min:
+                        row["reject"] = f"bar_top_suspect(间距{gap:.3f}<{gap_min})"
             rows.append(row)
 
         # overlay：样例 + 稍后按指标挑选的（先存样例，其余跑完统一挑）
