@@ -161,7 +161,7 @@ def main():
     html = f'''<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <title>S1 横杆检测评审 v2 — cam_{args.cam}</title><style>
 body{{font-family:system-ui,"Microsoft YaHei",sans-serif;margin:0;background:#f2f3f5;color:#1b1b1b}}
-header{{position:sticky;top:0;background:#fff;padding:10px 16px;box-shadow:0 1px 4px rgba(0,0,0,.12);z-index:9}}
+header{{background:#fff;padding:10px 16px;box-shadow:0 1px 4px rgba(0,0,0,.12)}}
 h1{{font-size:16px;margin:0 0 6px}}
 .meta{{font-size:12px;color:#555;line-height:1.6}}
 .hist{{max-width:860px;width:100%;display:block;margin:8px auto 2px}}
