@@ -116,7 +116,8 @@ def main():
         if img is None:
             return ""
         fit = det.detect(img, spine_bottom_y=sb)
-        overlay = det.draw(img, fit, sb)
+        # 特粗笔画：4K 上画 12px，缩到卡片尺寸后仍有 ~2px 清晰可见
+        overlay = det.draw(img, fit, sb, thick=12, font=2.4, pr=16)
         crop = overlay[1830:2160, :]                       # 底部 15% 区域
         big = jpeg_b64(crop, 960, 50, target_h=300)        # 纵向拉伸 ~3.3 倍
         frac = float(r["bar_frac"]) if r["bar_frac"] else None

@@ -279,29 +279,36 @@ class BarDetector:
                              inlier_ratio=fit.inlier_ratio, n_points=fit.n_points)
         return obs
 
-    def draw(self, frame, fit, spine_bottom_y=None):
-        """可视化：拟合线、扫描点（绿=内点 红=离群）、搜索区上界，人工核对用"""
+    def draw(self, frame, fit, spine_bottom_y=None, thick=3, font=1.1, pr=6):
+        """可视化：拟合线、扫描点（绿=内点 红=离群）、搜索区上界，人工核对用
+
+        :param thick/font/pr: 笔触/字号/点半径。在 4K 原图上画再缩小的场景
+            （如评审页），传大值（如 thick=12）保证缩小后仍清晰可见。
+        """
         vis = frame.copy()
         h, w = vis.shape[:2]
         if spine_bottom_y is not None:
-            cv2.line(vis, (0, int(spine_bottom_y)), (w, int(spine_bottom_y)), (255, 128, 0), 2)
-            cv2.putText(vis, f"spine_bottom={spine_bottom_y:.0f}", (20, int(spine_bottom_y) - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 128, 0), 2, cv2.LINE_AA)
+            y_sb = int(spine_bottom_y)
+            cv2.line(vis, (0, y_sb), (w, y_sb), (255, 128, 0), thick)
+            cv2.putText(vis, f"spine_bottom={spine_bottom_y:.0f}", (20, max(40, y_sb - int(pr * 2))),
+                        cv2.FONT_HERSHEY_SIMPLEX, font * 0.8, (255, 128, 0), thick, cv2.LINE_AA)
         if fit is None:
-            cv2.putText(vis, "BAR NOT FOUND", (20, h - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3, cv2.LINE_AA)
+            cv2.putText(vis, "BAR NOT FOUND", (20, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, font * 1.2, (0, 0, 255), thick, cv2.LINE_AA)
             return vis
 
+        b = fit.y_center - fit.slope * (w / 2.0)
         if fit.points is not None:
-            b = fit.y_center - fit.slope * (w / 2.0)
             for x, y in fit.points:
                 res = abs(y - (fit.slope * x + b))
                 color = (0, 255, 0) if res <= self.inlier_tol_px else (0, 0, 255)
-                cv2.circle(vis, (int(x), int(y)), 6, color, -1, cv2.LINE_AA)
-            x1, x2 = 0, w
-            cv2.line(vis, (x1, int(fit.slope * x1 + b)), (x2, int(fit.slope * x2 + b)),
-                     (0, 255, 255), 3, cv2.LINE_AA)
+                cv2.circle(vis, (int(x), int(y)), pr, color, -1, cv2.LINE_AA)
+        x1, x2 = 0, w
+        cv2.line(vis, (x1, int(fit.slope * x1 + b)), (x2, int(fit.slope * x2 + b)),
+                 (0, 255, 255), thick, cv2.LINE_AA)
         tag = (f"y={fit.y_center:.0f} ({fit.y_center / h:.3f}H)  "
                f"slope={fit.slope_deg:+.2f}deg  inliers={fit.inlier_ratio:.0%}")
-        cv2.putText(vis, tag, (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 255, 255), 3, cv2.LINE_AA)
+        # 说明文字放左上角：底部正是黄线所在区域，别把它盖住
+        cv2.putText(vis, tag, (20, 40 + int(pr * 3)), cv2.FONT_HERSHEY_SIMPLEX,
+                    font, (0, 255, 255), thick, cv2.LINE_AA)
         return vis
