@@ -118,6 +118,12 @@ button:hover{background:#3a4048}
 </div>
 <div class="bar"><div id="pbar"></div></div>
 <div class="info" id="info"></div>
+<div class="btns">
+  <button onclick="exportCSV()">⬇ 导出标注CSV</button>
+  <button onclick="exportProgress()">⬇ 导出进度</button>
+  <label style="font-size:13px;color:#999">⬆ 导入进度 <input type="file" accept=".json"
+       onchange="importProgress(this)" style="display:inline-block;width:auto"></label>
+</div>
 </header>
 <div class="wrap">
 <img id="rawImg" src="">
