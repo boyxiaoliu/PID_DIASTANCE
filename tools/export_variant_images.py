@@ -119,20 +119,20 @@ def main():
             print(f"[warn] 缺原图: {name}")
             continue
         sb = spine.get(name)
-        small = cv2.resize(img, (1920, 1080), interpolation=cv2.INTER_AREA)
         for m in METHODS:
             y, slope, inl, npts, mask, pts = variant_detect(img, sb, m)
             if y is None:
-                fn = f"未检出_{name}.jpg"
-                vis = cv2.resize(img, (1920, 1080), interpolation=cv2.INTER_AREA)
-                cv2.putText(vis, "NO LINE (inliers<0.7 or pts<8)", (20, 90),
+                vis = img.copy()
+                cv2.putText(vis, "NO LINE (inliers<0.7 or pts<8)", (20, 40 + PR * 3),
                             cv2.FONT_HERSHEY_SIMPLEX, FONT, (0, 0, 255), THICK, cv2.LINE_AA)
                 if sb:
-                    cv2.line(vis, (0, int(sb * 0.5)), (1920, int(sb * 0.5)), (255, 128, 0), THICK, cv2.LINE_AA)
+                    cv2.line(vis, (0, int(sb)), (img.shape[1], int(sb)), (255, 128, 0), THICK, cv2.LINE_AA)
+                fn = f"未检出_{name}.jpg"
             else:
                 star = MARK.get(name, "")
-                vis = draw(small, None if sb is None else sb * 0.5, y, slope, mask, pts)
+                vis = draw(img, sb, y, slope, mask, pts)          # 先在 4K 上画
                 fn = f"有效{star}_{y / 2160:.4f}_{name}.jpg"
+            vis = cv2.resize(vis, (1920, 1080), interpolation=cv2.INTER_AREA)  # 后缩小
             imwrite_utf8(os.path.join(outs[m], fn), vis, [cv2.IMWRITE_JPEG_QUALITY, 85])
         n_done += 1
         if n_done % 50 == 0:
