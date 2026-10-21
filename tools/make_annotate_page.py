@@ -23,11 +23,8 @@ from pid_servo import utils
 
 
 def sys_state_of(reject, found):
-    if found and not reject:
-        return "有效"
-    if reject and (reject.startswith("saturated") or reject.startswith("yellow_crosses_blue")):
-        return "饱和"
-    return "丢失"
+    """系统布尔值：该帧有没有给出读数（usable）"""
+    return 1 if (found and not reject) else 0
 
 
 def main():
@@ -61,12 +58,15 @@ def main():
             continue
         items.append({"name": name, "sys": sys_state_of(r["reject"], r["found"]),
                       "raw": f"{raw_rel}/{name}.jpg", "ann": ann})
+        # 语义（G1 用户定稿）：标注目标 = 系统布尔值的对错。
+        # sys=1 该帧给出了读数；sys=0 没给（饱和/相交/内点/roll/未检出统称）。
+        # 人工要抓的：sys=1 但人工判"不该给" 的危险假通过。
 
     rng_seed = 20261018
     order = sorted(range(len(items)), key=lambda i: (i * 7919 + 13) % len(items))  # 固定伪洗牌
 
     html = '''<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<title>S1 分类盲标 — cam_4</title><style>
+<title>S1 布尔对错盲标 — cam_4</title><style>
 body{font-family:system-ui,"Microsoft YaHei",sans-serif;margin:0;background:#17191c;color:#e8e8e8}
 header{padding:10px 16px;background:#202329;position:sticky;top:0;z-index:9}
 h1{font-size:15px;margin:0 0 4px}
@@ -83,14 +83,15 @@ button:hover{background:#3a4048}
 .info{font-size:13px;color:#ccc;text-align:center;margin:6px 0}
 .done{color:#3aa76d}
 </style></head><body>
-<header><h1>S1 分类盲标（cam_4，__N__ 张）—— 只判"系统归的类对不对"</h1>
+<header><h1>S1 布尔对错盲标（cam_4，__N__ 张）—— 这帧"该不该给读数"？</h1>
 <div class="guide">
-判定标准（看原图回答"真实状态"）：<b>1 有效</b>=横杆下沿清晰可见、可给出读数；
-<b>2 饱和</b>=太近，下沿不可见或与书底融为一体；
-<b>3 丢失</b>=结构乱/相机歪/认不出横杆。<br>
-快捷键：<b>1/2/3</b> 判定并自动下一张 ｜ <b>4</b>=没把握(留空) ｜ <b>d</b>=偷看系统叠加图(判完再看) ｜
-<b>0 或 ←</b>=上一张改判。进度存在浏览器里（请隔一段点一次"导出进度"防丢），
-标完点"导出标注CSV"交给 AI 合并分析。
+<b>你的任务：抓"系统算出了比例、但布尔值该是 False"的假通过。</b><br>
+判定标准（看原图回答）：<b>1 该给</b> = 横杆下沿清晰可见，能读出可信的数；
+<b>0 不该给</b> = 下沿不可见/太近/与书底融合/结构乱/相机歪——任何让你觉得
+"这帧给不出可信读数"的情况（<b>不用管系统把它归成了哪类，只判该不该给</b>）。<br>
+快捷键：<b>1</b>=该给 ｜ <b>0</b>=不该给 ｜ <b>4</b>=没把握(留空) ｜ 判定自动下一张 ｜
+<b>d</b>=偷看系统叠加图(判完再对照) ｜ <b>←</b>=上一张改判。<br>
+进度存浏览器（隔段点"导出进度"防丢）；标完点"导出标注CSV"交给 AI 出对账表。
 </div>
 <div class="bar"><div id="pbar"></div></div>
 <div class="info" id="info"></div>
@@ -98,9 +99,8 @@ button:hover{background:#3a4048}
 <div class="wrap">
 <img id="rawImg" src="">
 <div class="btns">
-  <button onclick="judge(1)">1 有效</button>
-  <button onclick="judge(2)">2 饱和</button>
-  <button onclick="judge(3)">3 丢失</button>
+  <button onclick="judge(1)">1 该给读数</button>
+  <button onclick="judge(0)">0 不该给</button>
   <button onclick="judge(4)">4 没把握</button>
 </div>
 <div class="tag" id="tag"></div>
@@ -110,7 +110,7 @@ button:hover{background:#3a4048}
 <script>
 const DATA = __DATA__;
 const ORDER = __ORDER__;
-const KEY = "annotate_cam4_v2";
+const KEY = "annotate_cam4_v3_bool";
 function loadState(){
   try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch(e) { return {}; }
 }
@@ -118,7 +118,7 @@ let state = loadState();
 let pos = 0;
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e) {} }
 function cur(){ return DATA[ORDER[pos]]; }
-function labeledCount(){ return ORDER.filter(i => state[DATA[i].name]).length; }
+function labeledCount(){ return ORDER.filter(i => state[DATA[i].name] !== undefined).length; }
 function render(){
   const it = cur();
   document.getElementById("rawImg").src = it.raw;
@@ -129,7 +129,8 @@ function render(){
     `第 ${pos+1}/${ORDER.length} 张 ｜ 已标 <span class="done">${labeledCount()}</span>/${DATA.length}`;
   const v = state[it.name];
   document.getElementById("tag").textContent =
-    v ? "已判：" + ({1:"有效",2:"饱和",3:"丢失"})[v] + "（可改判）" : "未判定";
+    (v === undefined || v === null) ? "未判定" :
+    "已判：" + (v === 1 ? "该给" : v === 0 ? "不该给" : "没把握") + "（可改判）";
 }
 function judge(v){
   const n = cur().name;
@@ -149,13 +150,14 @@ function downloadText(text, fname){
   a.download = fname; a.click();
 }
 function exportCSV(){
-  let rows = "name,system,human,agree,danger\\n";
+  let rows = "name,system_usable,human_should,agree,danger_false_pass,overkill\\n";
   for (const it of DATA){
     const h = state[it.name];
-    const hn = h ? ({1:"有效",2:"饱和",3:"丢失"})[h] : "";
-    const agree = h ? (hn === it.sys ? "1" : "0") : "";
-    const danger = (it.sys === "有效" && h && h !== 1) ? "1" : "";
-    rows += `${it.name},${it.sys},${hn},${agree},${danger}\\n`;
+    if (h === undefined || h === null){ rows += `${it.name},${it.sys},,,,\\n`; continue; }
+    const agree = (h === it.sys) ? 1 : 0;
+    const fp = (it.sys === 1 && h === 0) ? 1 : 0;   // 危险假通过：系统给了读数、人工说不该
+    const ok2 = (it.sys === 0 && h === 1) ? 1 : 0;  // 保守误杀：系统没给、人工说该给
+    rows += `${it.name},${it.sys},${h},${agree},${fp},${ok2}\\n`;
   }
   downloadText(rows, "annotate_cam4_human.csv");
 }
@@ -169,11 +171,10 @@ function importProgress(inp){
 }
 document.addEventListener("keydown", e => {
   if (e.key === "1") judge(1);
-  else if (e.key === "2") judge(2);
-  else if (e.key === "3") judge(3);
+  else if (e.key === "0") judge(0);
   else if (e.key === "4") judge(4);
   else if (e.key === "d" || e.key === "D") togglePeek();
-  else if (e.key === "0" || e.key === "ArrowLeft") back();
+  else if (e.key === "ArrowLeft") back();
 });
 render();
 </script></body></html>'''
