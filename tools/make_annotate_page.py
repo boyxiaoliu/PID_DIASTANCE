@@ -1,14 +1,19 @@
-"""G1 工具：人工标注页生成器 v2 —— 轻量版（图片走相对路径，HTML 仅几十 KB）
+"""G1 工具：人工标注页生成器 v3 —— 三分类盲标（布尔 + 比例有无，用户定稿语义）
 
 用法（项目根目录）：
     python tools/make_annotate_page.py --cam 4
 
-v1 教训：494 张图 base64 内嵌成 33MB 巨页（解析卡死）+ file:// 下 localStorage
-可能被浏览器禁用导致脚本崩溃。v2 改为：
-    - 原图/叠加图用**相对路径**引用磁盘文件（标注器与图片同住 runs/，天然可达）
-    - 进度存储全程 try/catch 保护，另配"导出进度/导入进度"文件双保险
-    - 交互不变：1/2/3=有效/饱和/丢失，4=没把握，d=偷看叠加图，0/←=上一张
-产出 runs/annotate_cam{N}.html
+三分类语义（G1 用户定稿）：
+    1 该给读数        横杆下沿清晰可见（布尔 True）
+    2 不该给·蓝线在    太近，下沿不可见，但蓝线（书底/比例）还在画面最底边界（布尔 False，比例有）
+    3 不该给·蓝线无    连书底都不该有——结构乱/相机歪/整帧没法看（布尔 False，比例无）
+
+产出 runs/annotate_cam{N}.html：
+    1/2/3 三键判定自动下一张，d=偷看系统叠加图，←=上一张；
+    进度存浏览器（try/catch 保护）+ 导出/导入进度文件双保险；
+    导出 CSV：name, sys_usable, sys_spine_frac, human_class, agree_bool,
+              danger_false_pass（系统给了读数但人工判 2/3）。
+v1→v2 教训：图片走相对路径引用（不内嵌，HTML 几十 KB），进度存储 try/catch 保护。
 """
 
 import argparse
@@ -22,8 +27,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from pid_servo import utils
 
 
-def sys_state_of(reject, found):
-    """系统布尔值：该帧有没有给出读数（usable）"""
+def sys_usable_of(reject, found):
+    """系统布尔值：该帧有没有给出读数"""
     return 1 if (found and not reject) else 0
 
 
@@ -33,12 +38,17 @@ def main():
     args = ap.parse_args()
 
     cfg = utils.load()
-    # 相对路径基准：HTML 在 runs/ 下；数据集在项目根的上一级 → ../../；叠加图同住 runs/
-    raw_rel = f"../../图书馆数据8_7/01_原图/cam_{args.cam}"
+    raw_rel = f"../../图书馆数据8_7/01_原图/cam_{args.cam}"   # runs/ 的上一级的上一级
     ann_rel = f"识别图_cam{args.cam}"
 
-    rows = list(csv.DictReader(open(os.path.join("runs", "s1_bar", f"bar_cam{args.cam}.csv"),
-                                    encoding="utf-8")))
+    bar = {}
+    with open(os.path.join("runs", "s1_bar", f"bar_cam{args.cam}.csv"), encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            bar[r["name"]] = r
+    spine_frac = {}
+    with open(os.path.join("runs", "s1_spine", f"spine_cam{args.cam}.csv"), encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            spine_frac[r["name"]] = r["spine_frac"]
 
     def ann_file_of(name, bar_frac, found):
         p1 = f"{ann_rel}/有效_{bar_frac}_{name}.jpg"
@@ -50,23 +60,20 @@ def main():
         return None
 
     items = []
-    for r in rows:
-        name = r["name"]
+    for name, r in sorted(bar.items()):
         ann = ann_file_of(name, r["bar_frac"], r["found"])
         if ann is None:
             print(f"[warn] 缺叠加图跳过: {name}")
             continue
-        items.append({"name": name, "sys": sys_state_of(r["reject"], r["found"]),
+        items.append({"name": name,
+                      "sys": sys_usable_of(r["reject"], r["found"]),
+                      "spine": spine_frac.get(name, ""),
                       "raw": f"{raw_rel}/{name}.jpg", "ann": ann})
-        # 语义（G1 用户定稿）：标注目标 = 系统布尔值的对错。
-        # sys=1 该帧给出了读数；sys=0 没给（饱和/相交/内点/roll/未检出统称）。
-        # 人工要抓的：sys=1 但人工判"不该给" 的危险假通过。
 
-    rng_seed = 20261018
     order = sorted(range(len(items)), key=lambda i: (i * 7919 + 13) % len(items))  # 固定伪洗牌
 
     html = '''<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<title>S1 布尔对错盲标 — cam_4</title><style>
+<title>S1 三分类盲标 — cam_4</title><style>
 body{font-family:system-ui,"Microsoft YaHei",sans-serif;margin:0;background:#17191c;color:#e8e8e8}
 header{padding:10px 16px;background:#202329;position:sticky;top:0;z-index:9}
 h1{font-size:15px;margin:0 0 4px}
@@ -76,21 +83,19 @@ h1{font-size:15px;margin:0 0 4px}
 .wrap{max-width:1100px;margin:0 auto;padding:8px}
 img{width:100%;display:block;border-radius:8px;background:#000;min-height:200px}
 .btns{display:flex;gap:10px;margin:10px 0;justify-content:center}
-button{font-size:16px;padding:10px 22px;border-radius:8px;border:1px solid #555;
+button{font-size:15px;padding:10px 18px;border-radius:8px;border:1px solid #555;
        background:#2a2e34;color:#eee;cursor:pointer}
 button:hover{background:#3a4048}
 .tag{font-size:12px;color:#999;text-align:center;margin-top:4px}
 .info{font-size:13px;color:#ccc;text-align:center;margin:6px 0}
 .done{color:#3aa76d}
 </style></head><body>
-<header><h1>S1 布尔对错盲标（cam_4，__N__ 张）—— 这帧"该不该给读数"？</h1>
+<header><h1>S1 三分类盲标（cam_4，__N__ 张）—— 这帧属于哪一类？</h1>
 <div class="guide">
-<b>你的任务：抓"系统算出了比例、但布尔值该是 False"的假通过。</b><br>
-判定标准（看原图回答）：<b>1 该给</b> = 横杆下沿清晰可见，能读出可信的数；
-<b>2 不该给</b> = 下沿不可见/太近/与书底融合/结构乱/相机歪——任何让你觉得
-"这帧给不出可信读数"的情况（<b>不用管系统把它归成了哪类，只判该不该给</b>）。<br>
-快捷键：<b>1</b>=该给 ｜ <b>2</b>=不该给 ｜ <b>3</b>=没把握(留空) ｜ 判定自动下一张 ｜
-<b>d</b>=偷看系统叠加图(判完再对照) ｜ <b>←</b>=上一张改判。<br>
+<b>1 该给读数</b> = 横杆下沿清晰可见（布尔 True）；<br>
+<b>2 不该给·蓝线在</b> = 太近，下沿不可见，但蓝线（书底）还在画面最底边界一带（布尔 False，比例有）；<br>
+<b>3 不该给·蓝线无</b> = 连书底都不该有——结构乱/相机歪/整帧没法看（布尔 False，比例无）。<br>
+快捷键：<b>1/2/3</b> 判定并自动下一张 ｜ <b>d</b>=偷看系统叠加图(判完再对照) ｜ <b>←</b>=上一张改判。<br>
 进度存浏览器（隔段点"导出进度"防丢）；标完点"导出标注CSV"交给 AI 出对账表。
 </div>
 <div class="bar"><div id="pbar"></div></div>
@@ -100,8 +105,8 @@ button:hover{background:#3a4048}
 <img id="rawImg" src="">
 <div class="btns">
   <button onclick="judge(1)">1 该给读数</button>
-  <button onclick="judge(2)">2 不该给</button>
-  <button onclick="judge(3)">3 没把握</button>
+  <button onclick="judge(2)">2 不该给·蓝线在</button>
+  <button onclick="judge(3)">3 不该给·蓝线无</button>
 </div>
 <div class="tag" id="tag"></div>
 </div>
@@ -110,22 +115,16 @@ button:hover{background:#3a4048}
 <script>
 const DATA = __DATA__;
 const ORDER = __ORDER__;
-const KEY = "annotate_cam4_v4_bool";
+const KEY = "annotate_cam4_v5_class3";
+const CLS = {1:"该给读数", 2:"不该给·蓝线在", 3:"不该给·蓝线无"};
 function loadState(){
-  try {
-    const cur = JSON.parse(localStorage.getItem(KEY) || "{}");
-    const old = JSON.parse(localStorage.getItem("annotate_cam4_v3_bool") || "{}");
-    for (const k in old){ if (state_v3_to_v4(old[k]) !== undefined && cur[k] === undefined)
-      cur[k] = state_v3_to_v4(old[k]); }
-    return cur;
-  } catch(e) { return {}; }
+  try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch(e) { return {}; }
 }
-function state_v3_to_v4(v){ return v === 1 ? 1 : v === 0 ? 2 : undefined; }
 let state = loadState();
 let pos = 0;
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e) {} }
 function cur(){ return DATA[ORDER[pos]]; }
-function labeledCount(){ return ORDER.filter(i => state[DATA[i].name] !== undefined).length; }
+function labeledCount(){ return ORDER.filter(i => state[DATA[i].name]).length; }
 function render(){
   const it = cur();
   document.getElementById("rawImg").src = it.raw;
@@ -135,13 +134,10 @@ function render(){
   document.getElementById("info").innerHTML =
     `第 ${pos+1}/${ORDER.length} 张 ｜ 已标 <span class="done">${labeledCount()}</span>/${DATA.length}`;
   const v = state[it.name];
-  document.getElementById("tag").textContent =
-    (v === undefined || v === null) ? "未判定" :
-    "已判：" + (v === 1 ? "该给" : v === 2 ? "不该给" : "没把握") + "（可改判）";
+  document.getElementById("tag").textContent = v ? "已判：" + CLS[v] + "（可改判）" : "未判定";
 }
 function judge(v){
-  const n = cur().name;
-  if (v > 2) delete state[n]; else state[n] = v;
+  state[cur().name] = v;
   save();
   if (pos < ORDER.length - 1) { pos++; }
   render();
@@ -157,14 +153,13 @@ function downloadText(text, fname){
   a.download = fname; a.click();
 }
 function exportCSV(){
-  let rows = "name,system_usable,human_should,agree,danger_false_pass,overkill\\n";
+  let rows = "name,sys_usable,sys_spine_frac,human_class,agree_bool,danger_false_pass\n";
   for (const it of DATA){
     const h = state[it.name];
-    if (h === undefined || h === null){ rows += `${it.name},${it.sys},,,,\\n`; continue; }
-    const agree = (h === it.sys) ? 1 : 0;
-    const fp = (it.sys === 1 && h === 0) ? 1 : 0;   // 危险假通过：系统给了读数、人工说不该
-    const ok2 = (it.sys === 0 && h === 1) ? 1 : 0;  // 保守误杀：系统没给、人工说该给
-    rows += `${it.name},${it.sys},${h},${agree},${fp},${ok2}\\n`;
+    if (!h){ rows += `${it.name},${it.sys},${it.spine},,,\n`; continue; }
+    const agree = ((h === 1) === (it.sys === 1)) ? 1 : 0;
+    const danger = (it.sys === 1 && h !== 1) ? 1 : 0;   // 危险假通过：系统给了读数、人工判 2/3
+    rows += `${it.name},${it.sys},${it.spine},${h},${agree},${danger}\n`;
   }
   downloadText(rows, "annotate_cam4_human.csv");
 }
@@ -192,7 +187,7 @@ render();
     out = os.path.join("runs", f"annotate_cam{args.cam}.html")
     with open(out, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"标注页 v2 -> {out}  （{os.path.getsize(out) / 1024:.0f} KB，{len(items)} 张）")
+    print(f"标注页 v3 -> {out}  （{os.path.getsize(out) / 1024:.0f} KB，{len(items)} 张）")
 
 
 if __name__ == "__main__":
