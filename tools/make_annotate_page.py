@@ -87,9 +87,9 @@ button:hover{background:#3a4048}
 <div class="guide">
 <b>你的任务：抓"系统算出了比例、但布尔值该是 False"的假通过。</b><br>
 判定标准（看原图回答）：<b>1 该给</b> = 横杆下沿清晰可见，能读出可信的数；
-<b>0 不该给</b> = 下沿不可见/太近/与书底融合/结构乱/相机歪——任何让你觉得
+<b>2 不该给</b> = 下沿不可见/太近/与书底融合/结构乱/相机歪——任何让你觉得
 "这帧给不出可信读数"的情况（<b>不用管系统把它归成了哪类，只判该不该给</b>）。<br>
-快捷键：<b>1</b>=该给 ｜ <b>0</b>=不该给 ｜ <b>4</b>=没把握(留空) ｜ 判定自动下一张 ｜
+快捷键：<b>1</b>=该给 ｜ <b>2</b>=不该给 ｜ <b>3</b>=没把握(留空) ｜ 判定自动下一张 ｜
 <b>d</b>=偷看系统叠加图(判完再对照) ｜ <b>←</b>=上一张改判。<br>
 进度存浏览器（隔段点"导出进度"防丢）；标完点"导出标注CSV"交给 AI 出对账表。
 </div>
@@ -100,8 +100,8 @@ button:hover{background:#3a4048}
 <img id="rawImg" src="">
 <div class="btns">
   <button onclick="judge(1)">1 该给读数</button>
-  <button onclick="judge(0)">0 不该给</button>
-  <button onclick="judge(4)">4 没把握</button>
+  <button onclick="judge(2)">2 不该给</button>
+  <button onclick="judge(3)">3 没把握</button>
 </div>
 <div class="tag" id="tag"></div>
 </div>
@@ -110,10 +110,17 @@ button:hover{background:#3a4048}
 <script>
 const DATA = __DATA__;
 const ORDER = __ORDER__;
-const KEY = "annotate_cam4_v3_bool";
+const KEY = "annotate_cam4_v4_bool";
 function loadState(){
-  try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch(e) { return {}; }
+  try {
+    const cur = JSON.parse(localStorage.getItem(KEY) || "{}");
+    const old = JSON.parse(localStorage.getItem("annotate_cam4_v3_bool") || "{}");
+    for (const k in old){ if (state_v3_to_v4(old[k]) !== undefined && cur[k] === undefined)
+      cur[k] = state_v3_to_v4(old[k]); }
+    return cur;
+  } catch(e) { return {}; }
 }
+function state_v3_to_v4(v){ return v === 1 ? 1 : v === 0 ? 2 : undefined; }
 let state = loadState();
 let pos = 0;
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e) {} }
@@ -130,11 +137,11 @@ function render(){
   const v = state[it.name];
   document.getElementById("tag").textContent =
     (v === undefined || v === null) ? "未判定" :
-    "已判：" + (v === 1 ? "该给" : v === 0 ? "不该给" : "没把握") + "（可改判）";
+    "已判：" + (v === 1 ? "该给" : v === 2 ? "不该给" : "没把握") + "（可改判）";
 }
 function judge(v){
   const n = cur().name;
-  if (v > 3) delete state[n]; else state[n] = v;
+  if (v > 2) delete state[n]; else state[n] = v;
   save();
   if (pos < ORDER.length - 1) { pos++; }
   render();
@@ -171,8 +178,8 @@ function importProgress(inp){
 }
 document.addEventListener("keydown", e => {
   if (e.key === "1") judge(1);
-  else if (e.key === "0") judge(0);
-  else if (e.key === "4") judge(4);
+  else if (e.key === "2") judge(2);
+  else if (e.key === "3") judge(3);
   else if (e.key === "d" || e.key === "D") togglePeek();
   else if (e.key === "ArrowLeft") back();
 });
