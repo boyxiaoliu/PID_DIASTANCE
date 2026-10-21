@@ -17,6 +17,7 @@ v1→v2 教训：图片走相对路径引用（不内嵌，HTML 几十 KB），�
 """
 
 import argparse
+import base64
 import csv
 import json
 import os
@@ -24,7 +25,18 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import cv2
+
 from pid_servo import utils
+from pid_servo.utils import imread_utf8
+
+
+def jpeg_b64(img, width, quality):
+    h, w = img.shape[:2]
+    if w > width:
+        img = cv2.resize(img, (width, int(h * width / w)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
 def sys_usable_of(reject, found):
@@ -38,8 +50,8 @@ def main():
     args = ap.parse_args()
 
     cfg = utils.load()
-    raw_rel = f"../../图书馆数据8_7/01_原图/cam_{args.cam}"   # runs/ 的上一级的上一级
-    ann_rel = f"识别图_cam{args.cam}"
+    raw_dir = os.path.join(utils.get(cfg, "data.dataset8_7"), "01_原图", f"cam_{args.cam}")
+    ann_dir = os.path.join("runs", f"识别图_cam{args.cam}")
 
     bar = {}
     with open(os.path.join("runs", "s1_bar", f"bar_cam{args.cam}.csv"), encoding="utf-8") as f:
@@ -51,12 +63,12 @@ def main():
             spine_frac[r["name"]] = r["spine_frac"]
 
     def ann_file_of(name, bar_frac, found):
-        p1 = f"{ann_rel}/有效_{bar_frac}_{name}.jpg"
-        if found == "1" and os.path.exists(os.path.join("runs", p1)):
+        p1 = os.path.join(ann_dir, f"有效_{bar_frac}_{name}.jpg")
+        if found == "1" and os.path.exists(p1):
             return p1
-        for fn in os.listdir(os.path.join("runs", ann_rel)):
+        for fn in os.listdir(ann_dir):
             if fn.endswith(name + ".jpg"):
-                return f"{ann_rel}/{fn}"
+                return os.path.join(ann_dir, fn)
         return None
 
     items = []
@@ -65,10 +77,16 @@ def main():
         if ann is None:
             print(f"[warn] 缺叠加图跳过: {name}")
             continue
+        raw_img = imread_utf8(os.path.join(raw_dir, name + ".jpg"))
+        ann_img = imread_utf8(ann)
+        if raw_img is None or ann_img is None:
+            print(f"[warn] 缺图跳过: {name}")
+            continue
         items.append({"name": name,
                       "sys": sys_usable_of(r["reject"], r["found"]),
                       "spine": spine_frac.get(name, ""),
-                      "raw": f"{raw_rel}/{name}.jpg", "ann": ann})
+                      "raw": jpeg_b64(raw_img, 900, 50),
+                      "ann": jpeg_b64(ann_img, 480, 40)})
 
     order = sorted(range(len(items)), key=lambda i: (i * 7919 + 13) % len(items))  # 固定伪洗牌
 
@@ -127,9 +145,9 @@ function cur(){ return DATA[ORDER[pos]]; }
 function labeledCount(){ return ORDER.filter(i => state[DATA[i].name]).length; }
 function render(){
   const it = cur();
-  document.getElementById("rawImg").src = it.raw;
+  document.getElementById("rawImg").src = "data:image/jpeg;base64," + it.raw;
   const pk = document.getElementById("peekImg");
-  pk.src = it.ann; pk.style.display = "none";
+  pk.src = "data:image/jpeg;base64," + it.ann; pk.style.display = "none";
   document.getElementById("pbar").style.width = (100*labeledCount()/DATA.length) + "%";
   document.getElementById("info").innerHTML =
     `第 ${pos+1}/${ORDER.length} 张 ｜ 已标 <span class="done">${labeledCount()}</span>/${DATA.length}`;
