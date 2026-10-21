@@ -17,6 +17,7 @@ import json
 import math
 
 from dataclasses import dataclass, field
+import itertools
 
 import cv2
 import numpy as np
@@ -124,20 +125,28 @@ def _pick_peak(hp, lo, hi, min_contrast, rel_threshold, pick="bottommost"):
     return lo + _subpixel(seg, k)
 
 
-def _ransac_line(P, tol, iters=500, seed=0):
+def _ransac_line(P, tol, iters=500, seed=0, exhaustive_max_pairs=2000):
     """RANSAC 直线拟合：找支持点最多的一条边（点云混有多种边时锁定主导边）
 
     背景：横杆下方沿宽度方向混有 横杆顶边/标签牌底边/立柱 等多种结构，
     M-estimator(HUBER) 会被少数派拉偏 —— S1 真图实验（097 内点率仅 45%）驱动的升级。
-    固定种子保证批次可复现。
+
+    v0.2（G1 讨论"取次优线"时发现的抽样运气问题）：点数少时两两组合总数
+    极小（30 点仅 435 种），随机 500 次反而可能漏掉最优组合（实锤案例
+    102_L_1_2）。故点对总数 ≤ exhaustive_max_pairs 时**全枚举**——全局最优、
+    零随机、永远可复现；超限时退回随机采样（固定种子）。
 
     :return: (k, b, inlier_mask)  最小二乘重拟合后的直线与内点掩码
     """
-    rng = np.random.default_rng(seed)
     n = len(P)
+    idx_pairs = list(itertools.combinations(range(n), 2)) \
+        if n * (n - 1) // 2 <= exhaustive_max_pairs else None
+    if idx_pairs is None:
+        rng = np.random.default_rng(seed)
+        idx_pairs = [tuple(rng.choice(n, 2, replace=False)) for _ in range(iters)]
+
     best_mask, best_k, best_b = None, 0.0, 0.0
-    for _ in range(iters):
-        i, j = rng.choice(n, 2, replace=False)
+    for i, j in idx_pairs:
         dx = P[j, 0] - P[i, 0]
         if abs(dx) < 1e-3:
             continue
@@ -146,6 +155,8 @@ def _ransac_line(P, tol, iters=500, seed=0):
         mask = np.abs(P[:, 1] - (k * P[:, 0] + b)) <= tol
         if best_mask is None or mask.sum() > best_mask.sum():
             best_mask, best_k, best_b = mask, k, b
+    if best_mask is None:
+        best_mask = np.ones(n, dtype=bool)
     Q = P[best_mask]
     best_k, best_b = np.polyfit(Q[:, 0], Q[:, 1], 1)
     best_mask = np.abs(P[:, 1] - (best_k * P[:, 0] + best_b)) <= tol
