@@ -23,7 +23,7 @@ import cv2
 import numpy as np
 
 from pid_servo import utils
-from pid_servo.perception import _ransac_line
+from pid_servo.perception import BarFit, _ransac_line, yellow_crosses_blue
 from pid_servo.utils import imread_utf8, imwrite_utf8
 
 METHODS = ("lsd", "hough")
@@ -76,7 +76,11 @@ def variant_detect(img, sb, kind):
     ratio = inl.sum() / len(pts)
     if ratio < 0.70:
         return None, None, int(inl.sum()), len(pts), inl, pts
-    return float(k * w / 2 + b), float(k), int(inl.sum()), len(pts), inl, pts
+    fit = BarFit(y_center=float(k * w / 2 + b), slope=float(k), n_points=len(pts),
+                 inlier_ratio=ratio, residual_std=0.0)
+    if yellow_crosses_blue(fit, sb, w):      # G1 约束：画面内黄蓝不相交
+        return None, None, int(inl.sum()), len(pts), inl, pts
+    return fit.y_center, float(k), int(inl.sum()), len(pts), inl, pts
 
 
 def draw(img, sb, y_center, slope, inl, pts):

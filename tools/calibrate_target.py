@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from pid_servo import utils
-from pid_servo.perception import BarDetector
+from pid_servo.perception import BarDetector, yellow_crosses_blue
 from pid_servo.utils import imread_utf8, imwrite_utf8
 
 #: 体检重点关注的样例与格位标记
@@ -101,6 +101,9 @@ def main():
                     row["reject"] = f"inliers<{min_inlier}"
                 elif abs(fit.slope_deg) > slope_max:
                     row["reject"] = f"slope>{slope_max}deg"
+                elif spine_bottom is not None and yellow_crosses_blue(fit, spine_bottom, img.shape[1]):
+                    # G1 约束：画面内黄蓝两线不相交（物理不变量：横杆下沿恒在书底之下）
+                    row["reject"] = "yellow_crosses_blue(黄蓝相交)"
                 elif spine_bottom is not None:
                     # 标度规则（G1 用户提出）：黄线锁到上沿(与蓝线重合) = 横杆下沿已出画
                     # = 太近 → 读数按饱和值 1.0 计（闭环里=后退），标定不采用

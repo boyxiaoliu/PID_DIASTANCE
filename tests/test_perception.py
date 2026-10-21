@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from pid_servo.perception import (BarDetector, spine_stats_from_json_dict,
-                                  spine_stats_from_json_file)
+from pid_servo.perception import (BarDetector, BarFit, spine_stats_from_json_dict,
+                                  spine_stats_from_json_file, yellow_crosses_blue)
 
 import json
 import os
@@ -125,3 +125,26 @@ def test_observe_builds_contract():
     expect_center = 480 + (-0.02) * (w / 2)
     assert abs(obs.bar_frac * frame.shape[0] - expect_center) <= 4.0
     assert "inlier_ratio" in obs.debug
+
+
+# ---------- 黄蓝不相交约束（G1） ----------
+
+def _fit(y_center, slope):
+    return BarFit(y_center=y_center, slope=slope, n_points=20,
+                  inlier_ratio=0.9, residual_std=1.0)
+
+
+def test_yellow_crosses_blue_detection():
+    assert not yellow_crosses_blue(_fit(2100.0, 0.0), 2000.0, 3840)   # 平线在蓝线之下
+    # 右端 y = 2004 - 0.02*1920 = 1965.6 < 2000 → 画面内越过蓝线
+    assert yellow_crosses_blue(_fit(2004.0, -0.02), 2000.0, 3840)
+    assert not yellow_crosses_blue(None, 2000.0, 3840)                # 无拟合线不判交叉
+
+
+def test_observe_drops_bar_when_crossing():
+    det = BarDetector({"highpass_sigma": 201})
+    frame = make_synthetic_shelf()
+    # 构造一个会与蓝线相交的场景：斜率足够陡使右端越过书底 300
+    obs = det.observe(frame, spine=None, source="test")
+    # 正常合成场景不会相交
+    assert "yellow_crosses_blue" not in obs.debug

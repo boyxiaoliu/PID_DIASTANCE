@@ -37,6 +37,8 @@ def status_of(r):
         return "饱和太近按1.0计", f"{float(r['bar_frac']):.4f}" if r["bar_frac"] else "1.0000"
     if rej.startswith("saturated_not_found"):
         return "饱和太近按1.0计", "1.0000"
+    if rej.startswith("yellow_crosses_blue"):
+        return "剔除黄蓝相交", f"{float(r['bar_frac']):.4f}" if r["bar_frac"] else ""
     if rej.startswith("inliers"):
         return "剔除内点不足", f"{float(r['bar_frac']):.4f}" if r["bar_frac"] else ""
     if rej.startswith("roll"):

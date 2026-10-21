@@ -152,6 +152,20 @@ def _ransac_line(P, tol, iters=500, seed=0):
     return float(best_k), float(best_b), best_mask
 
 
+def yellow_crosses_blue(fit, spine_bottom_y, img_w):
+    """黄线（横杆下沿拟合直线）在画面内是否触及/越过蓝线（书本最低点）
+
+    物理不变量：横杆下沿恒在书底之下 → 两条线在画面内绝不允许相交。
+    蓝线是水平线（单一 y 值），黄线是斜线，故只需检查黄线在画面左右两端
+    的较低端是否 ≤ 蓝线（G1 用户约束）。
+    """
+    if fit is None or spine_bottom_y is None:
+        return False
+    y_left = fit.y_center - fit.slope * (img_w / 2.0)
+    y_right = fit.y_center + fit.slope * (img_w / 2.0)
+    return min(y_left, y_right) <= spine_bottom_y
+
+
 # ========== 横杆检测器 ==========
 
 @dataclass
@@ -267,6 +281,12 @@ class BarDetector:
         :return: Observation（bar_frac 可用时 usable=True）
         """
         fit = self.detect(frame, spine.y if spine is not None else None)
+        if fit is not None and spine is not None and yellow_crosses_blue(fit, spine.y, frame.shape[1]):
+            # 物理不变量被破坏 = 拟合锁错结构，读数作废（闭环按丢失处理 → 后退）
+            obs = Observation(frame_size=frame.shape[:2], spine=spine, bar=None,
+                              source=(source or f"{'spine' if spine else 'none'}+{self.name}"))
+            obs.debug["reject"] = "yellow_crosses_blue"
+            return obs
         obs = Observation(
             frame_size=frame.shape[:2] if frame is not None and getattr(frame, "size", 0) else (0, 0),
             spine=spine,
