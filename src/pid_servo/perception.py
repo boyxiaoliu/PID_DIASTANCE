@@ -207,7 +207,7 @@ class BarDetector:
 
     name = "opencv_bar_fitline_v0"
 
-    def __init__(self, cfg=None):
+    def __init__(self, cfg=None, health_cfg=None):
         cfg = cfg or {}
         self.highpass_sigma = int(cfg.get("highpass_sigma", 201))
         self.spine_margin_frac = float(cfg.get("spine_margin_frac", 0.010))
@@ -220,11 +220,14 @@ class BarDetector:
         self.min_points = int(cfg.get("min_points", 8))
         self.inlier_tol_px = float(cfg.get("inlier_tol_px", 12.0))
         self.fit_method = cfg.get("fit", "ransac")   # ransac=锁主导边 / huber=M-estimator
+        # 在线标度规则（G1 定稿，与离线体检同源）：黄蓝间距过近 = 太近 = 不可用
+        self.gap_min_frac = float((health_cfg or {}).get("gap_min_frac", 0.015))
 
     @classmethod
     def from_config(cls, path=None):
         from . import utils
-        return cls(utils.get(utils.load(path), "perception.bar", {}))
+        cfg = utils.load(path)
+        return cls(utils.get(cfg, "perception.bar", {}), utils.get(cfg, "health", {}))
 
     def detect(self, frame, spine_bottom_y=None, keep_points=False):
         """对一帧检测横杆
@@ -292,11 +295,19 @@ class BarDetector:
         :return: Observation（bar_frac 可用时 usable=True）
         """
         fit = self.detect(frame, spine.y if spine is not None else None)
-        if fit is not None and spine is not None and yellow_crosses_blue(fit, spine.y, frame.shape[1]):
-            # 物理不变量被破坏 = 拟合锁错结构，读数作废（闭环按丢失处理 → 后退）
+        reject = None
+        if fit is not None and spine is not None:
+            # 物理不变量：画面内黄蓝不相交（锁错结构 → 作废）
+            if yellow_crosses_blue(fit, spine.y, frame.shape[1]):
+                reject = "yellow_crosses_blue"
+            # 标度规则：黄蓝间距过近 = 横杆下沿不可见 = 太近（G1 定稿，
+            # 与离线体检/饱和家族同源）——在线路径曾漏此关，读数会诱使前进
+            elif (fit.y_center - spine.y) / max(frame.shape[0], 1) < self.gap_min_frac:
+                reject = "saturated_too_close"
+        if reject is not None:
             obs = Observation(frame_size=frame.shape[:2], spine=spine, bar=None,
                               source=(source or f"{'spine' if spine else 'none'}+{self.name}"))
-            obs.debug["reject"] = "yellow_crosses_blue"
+            obs.debug["reject"] = reject
             return obs
         obs = Observation(
             frame_size=frame.shape[:2] if frame is not None and getattr(frame, "size", 0) else (0, 0),

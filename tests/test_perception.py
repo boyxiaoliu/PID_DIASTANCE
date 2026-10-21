@@ -3,7 +3,8 @@
 import numpy as np
 
 from pid_servo.perception import (BarDetector, BarFit, spine_stats_from_json_dict,
-                                  spine_stats_from_json_file, yellow_crosses_blue)
+                                  spine_stats_from_json_file, yellow_crosses_blue,
+                                  SpineBottom)
 
 import json
 import os
@@ -148,3 +149,16 @@ def test_observe_drops_bar_when_crossing():
     obs = det.observe(frame, spine=None, source="test")
     # 正常合成场景不会相交
     assert "yellow_crosses_blue" not in obs.debug
+
+
+def test_observe_drops_saturated_gap():
+    """G1 在线标度规则：黄蓝间距过近 = 太近 = 读数作废。
+
+    此关曾只在离线体检工具里实现，在线 observe() 漏掉——带 100% 内点率的
+    假读数（如 0.938）会诱使控制器前进，撞向已经太近的书架。"""
+    det = BarDetector({"highpass_sigma": 201})
+    frame = make_synthetic_shelf(slope=0.0)            # 平横杆：读数 480
+    # 书底 474 → 中心间距 (480-474)/540 = 0.011 < 0.015 → 饱和
+    obs = det.observe(frame, spine=SpineBottom(y=474.0, confidence=0.9, n_books=5), source="t")
+    assert obs.bar is None and not obs.usable
+    assert obs.debug["reject"] == "saturated_too_close"
