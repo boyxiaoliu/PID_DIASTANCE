@@ -29,7 +29,11 @@ MARK = {"4_B_097_L_8_1_4": "完美基准097", "4_B_098_R_7_2_4": "偏远样例09
 
 
 def status_of(r):
-    """CSV 行 → (文件名前缀状态, 排序用读数字符串)"""
+    """CSV 行 → (文件名前缀状态, 排序用读数字符串)
+
+    分类语义（G1 用户目检定稿）：黄蓝相交 = 下沿不可见 = 太近，与间距饱和同族，
+    统一归入"饱和太近按1.0计"家族，判定依据缀在名字里。
+    """
     rej = r["reject"]
     if not rej:
         return "有效", f"{float(r['bar_frac']):.4f}"
@@ -38,7 +42,7 @@ def status_of(r):
     if rej.startswith("saturated_not_found"):
         return "饱和太近按1.0计", "1.0000"
     if rej.startswith("yellow_crosses_blue"):
-        return "剔除黄蓝相交", f"{float(r['bar_frac']):.4f}" if r["bar_frac"] else ""
+        return "饱和太近按1.0计_相交判定", f"{float(r['bar_frac']):.4f}" if r["bar_frac"] else ""
     if rej.startswith("inliers"):
         return "剔除内点不足", f"{float(r['bar_frac']):.4f}" if r["bar_frac"] else ""
     if rej.startswith("roll"):
@@ -104,12 +108,13 @@ def main():
 蓝线 = 书本最低点（搜索区上界，正常应在黄线上方不远处）
 绿点/红点 = 找到的边缘点（绿=与黄线一致，红=捣乱）
 
-文件名 = 状态_读数_图名，按名称排序即按读数排序：
-  有效_       读数可信（0.92~0.99，从近到远）
-  饱和太近按1.0计_  横杆下沿出画，闭环按 1.0 处理（只许后退）
-  剔除内点不足_     结构乱、读数不可信
-  剔除roll歪_       相机旋转歪超 3°
-  未检出_           找不到横杆（多为太近撑满画面）
+文件名 = 状态_读数_图名，按名称排序即按读数排序。三大类：
+  有效_              读数可信（0.92~0.99，从近到远）——闭环 PID 正常推进
+  饱和太近按1.0计_   太近、横杆下沿不可见（含"相交判定"子类），
+                     闭环读数按 1.0 处理 = 只许后退
+  剔除内点不足_      结构乱、读数不可信（丢失）
+  剔除roll歪_        相机旋转歪超 3°（丢失）
+  未检出_            找不到横杆（丢失）
 """ % (args.cam, len(rows)))
 
     size_mb = sum(os.path.getsize(os.path.join(out, f)) for f in os.listdir(out)) / 1e6
