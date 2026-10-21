@@ -1,0 +1,119 @@
+meta:
+  version: 0.2.0
+  updated: '2026-10-18'
+  note: S3 仿真版。target=G1 拟定值(0.955/±0.03)；新增控制饱和规则节与 S3 仿真节
+perception:
+  spine:
+    min_confidence: 0.5
+    max_boxes: 20
+    offline_json_root: D:/Claude/01_图书馆项目/图书馆数据8_7/02_检测JSON
+  bar:
+    highpass_sigma: 201
+    spine_margin_frac: 0.01
+    fallback_zone_frac: 0.85
+    min_contrast: 4.0
+    rel_threshold: 0.4
+    scan_win_frac: 0.07
+    scan_step_frac: 0.035
+    pick: bottommost
+    min_points: 8
+    inlier_tol_px: 12.0
+    fit: ransac
+health:
+  roll_max_deg: 3.0
+  min_inlier_ratio: 0.7
+  slope_abs_max_deg: 6.0
+  gap_min_frac: 0.015
+target:
+  bar_y_frac: 0.955
+  bar_y_frac_tol: 0.03
+control:
+  pid:
+    kp: 3.7
+    ki: 0.3
+    kd: 0.2
+    out_limit: 0.2
+    i_limit: 0.15
+    deadband: 0.004
+    d_alpha: 0.2
+    dt_default: 0.5
+    out_limit_far: 0.5
+    far_threshold: 0.15
+  loop:
+    max_iters: 40
+    hold_frames: 3
+    backoff_m: 0.05
+    max_backoff: 15
+    sat_step_m: 0.03
+    fwd_limit: 0.05
+    fwd_limit_far_zone: 0.15
+    fwd_cap_err: 0.06
+    close_band: 0.11
+  saturation:
+    spine_frac_sat: 0.95
+    sat_reading: 1.0
+  mover:
+    chassis_url: http://10.230.152.204:1448
+    action_timeout_s: 60.0
+    poll_interval_s: 0.2
+    request_timeout_s: 5.0
+    position_tol_m: 0.1
+    max_recheck: 1
+    invert_dir: false
+    settle_ms: 800
+  spine_detector:
+    model_path: ''
+    input_size: 1024
+    class_id: 0
+camera:
+  cam_id: '4'
+  preview_height: 540
+  preview_width: 960
+  fourcc: MJPG
+  fps: 30
+  device_path: ''
+  settle_frames: 3
+  light:
+    enabled: false
+    port: /dev/ttyCH341USB0
+    baudrate: 38400
+sim:
+  A: 0.5
+  gap0_frac: 0.058
+  noise_std: 0.005
+  gap_noise_std: 0.005
+  dropout: 0.024
+  move_std: 0.02
+  bar_out_frac: 1.0
+  topedge_offset: 0.008
+  topedge_std: 0.003
+  img_h: 2160
+  img_w: 3840
+  d_floor: 0.25
+  d0_list:
+  - 0.9
+  - 1.2
+  - 1.5
+  - 2.0
+  - 2.5
+  - 3.0
+  - 3.4
+  noise_mults:
+  - 1
+  - 2
+  - 3
+  d_star_list:
+  - 1.2
+  - 1.5
+  - 1.8
+  seeds: 200
+  sec_per_iter: 5
+  safety_margin_m: 0.15
+data:
+  dataset8_7: D:/Claude/01_图书馆项目/图书馆数据8_7
+  ori_img_save: D:/Library_Project/ori_img_save
+  label_classes:
+    spine: 15
+    shelf_top: 16
+    shelf_bot: 18
+    rack_label: 19
