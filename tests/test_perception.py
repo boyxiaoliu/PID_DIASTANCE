@@ -158,7 +158,8 @@ def test_observe_drops_saturated_gap():
     假读数（如 0.938）会诱使控制器前进，撞向已经太近的书架。"""
     det = BarDetector({"highpass_sigma": 201})
     frame = make_synthetic_shelf(slope=0.0)            # 平横杆：读数 480
-    # 书底 474 → 中心间距 (480-474)/540 = 0.011 < 0.015 → 饱和
-    obs = det.observe(frame, spine=SpineBottom(y=474.0, confidence=0.9, n_books=5), source="t")
+    # 书底 472.5 → 中心间距 (480-472.5)/540 = 0.0139 < 0.015 → 饱和
+    # （峰位 479~480 须稳落在搜索区内，故书底不能贴着 474.4 的余量线）
+    obs = det.observe(frame, spine=SpineBottom(y=472.5, confidence=0.9, n_books=5), source="t")
     assert obs.bar is None and not obs.usable
     assert obs.debug["reject"] == "saturated_too_close"
