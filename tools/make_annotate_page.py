@@ -36,8 +36,8 @@ def main():
     args = ap.parse_args()
 
     cfg = utils.load()
-    # 相对路径基准：HTML 在 runs/ 下；原图在 ../图书馆数据8_7/...；叠加图在 识别图_cam4/
-    raw_rel = f"../图书馆数据8_7/01_原图/cam_{args.cam}"
+    # 相对路径基准：HTML 在 runs/ 下；数据集在项目根的上一级 → ../../；叠加图同住 runs/
+    raw_rel = f"../../图书馆数据8_7/01_原图/cam_{args.cam}"
     ann_rel = f"识别图_cam{args.cam}"
 
     rows = list(csv.DictReader(open(os.path.join("runs", "s1_bar", f"bar_cam{args.cam}.csv"),
