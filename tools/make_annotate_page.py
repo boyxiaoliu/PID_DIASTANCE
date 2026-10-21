@@ -131,6 +131,9 @@ button:hover{background:#3a4048}
 <img id="peekImg" style="display:none;position:fixed;right:12px;bottom:12px;max-width:420px;
      border:2px solid #888;border-radius:8px;z-index:99" src="" alt="系统叠加图">
 <script>
+window.onerror = function(msg, src, line){
+  document.getElementById("info").innerHTML = "⚠️ 脚本错误: " + msg + " @行" + line;
+};
 const DATA = __DATA__;
 const ORDER = __ORDER__;
 const KEY = "annotate_cam4_v5_class3";
@@ -171,13 +174,14 @@ function downloadText(text, fname){
   a.download = fname; a.click();
 }
 function exportCSV(){
-  let rows = "name,sys_usable,sys_spine_frac,human_class,agree_bool,danger_false_pass\n";
+  const NL = String.fromCharCode(10);
+  let rows = "name,sys_usable,sys_spine_frac,human_class,agree_bool,danger_false_pass" + NL;
   for (const it of DATA){
     const h = state[it.name];
-    if (!h){ rows += `${it.name},${it.sys},${it.spine},,,\n`; continue; }
+    if (!h){ rows += `${it.name},${it.sys},${it.spine},,,` + NL; continue; }
     const agree = ((h === 1) === (it.sys === 1)) ? 1 : 0;
     const danger = (it.sys === 1 && h !== 1) ? 1 : 0;   // 危险假通过：系统给了读数、人工判 2/3
-    rows += `${it.name},${it.sys},${it.spine},${h},${agree},${danger}\n`;
+    rows += `${it.name},${it.sys},${it.spine},${h},${agree},${danger}` + NL;
   }
   downloadText(rows, "annotate_cam4_human.csv");
 }
