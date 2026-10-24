@@ -79,6 +79,10 @@ class ChassisHttp:
         return self._requests.post(self.base_url + path, json=body,
                                    timeout=self.request_timeout_s)
 
+    def put_json(self, path, body):
+        return self._requests.put(self.base_url + path, json=body,
+                                  timeout=self.request_timeout_s)
+
     def delete(self, path):
         return self._requests.delete(self.base_url + path, timeout=self.request_timeout_s)
 

@@ -8,9 +8,9 @@
 # =============================================================================
 
 meta:
-  version: "0.3.0"
+  version: "0.3.1"
   updated: "2026-10-24"
-  note: "S5 前置版：新增收敛终验（confirm_attempts）与 4K 确认照（final_shot + camera.still/quality）；闭环步长参数不变"
+  note: "S5 前置版：收敛终验（confirm_attempts）+ 4K 确认照（final_shot + camera.still/quality）+ 交接学长系统（handoff，默认关）；闭环步长参数不变"
 
 # -----------------------------------------------------------------------------
 # 感知层 〔线A 认领〕
@@ -139,6 +139,24 @@ control:
   final_shot:                # 确认照（S5 新增）：终验到位后按学长标准拍的高清存档，
                              # 是闭环的验收证据；下游正式盘点由学长系统负责，本工具到此为止
     enabled: true            # false = 只做终验不拍确认照
+
+  handoff:                   # 交接学长系统（S5 新增，默认关）：确认照合格后自动
+                             # "改 POI 坐标 + 派盘点任务"，见 src/pid_servo/robot/handoff.py。
+                             # ⚠️ 现场交接前先重启学长系统：其 ia.move 的 POI 坐标有进程内
+                             # 缓存（chassis_control.py self.pois，首次 move 后不刷新），
+                             # 带旧缓存运行时本模块改的 POI 对他不生效
+    enabled: false           # 总开关；CLI --handoff 可临时强制开启
+    api_url: "http://127.0.0.1:5000"
+                             # 学长 Flask API（API 接口文档.md：本机 5000 口）；现场按实际改
+    update_poi: true         # 先把 poi_key 坐标改成当前对齐位姿（防 ia.move 把车开走）
+    task_type: 1             # 1=指定列盘点（floor/area/rack/side/column，lr_restful_api 校验同源）
+    poi_key: "4_B_094_L_8_1" # TODO(S5上板) 底盘 POI 的 display_name，现场按实际点位改
+    floor: 4                 # ---- 以下为 task_type=1 的任务参数（同上，现场改）----
+    area: "B"
+    rack: 94
+    side: "L"
+    column: 8
+    timeout_s: 10.0          # 单个交接请求超时（秒）
 
 # -----------------------------------------------------------------------------
 # 相机 / 采集 〔线B 认领，真机阶段启用〕

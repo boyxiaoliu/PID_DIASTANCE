@@ -103,14 +103,18 @@ def test_never_confirmed_exit_1_no_photo(tmp_path):
 
 
 def test_final_shot_disabled_still_exit_0(tmp_path):
-    """关闭确认照（--set control.final_shot.enabled=false）：只做到位确认，exit 0。"""
+    """关闭确认照（--set control.final_shot.enabled=false）：只做到位确认，exit 0。
+
+    final_meta.json 仍会落盘（终验/位姿/交接是结果记录），只是 shot 为 None。
+    """
     tool = make_tool()
     out = str(tmp_path / "run")
     rc = tool.main(["--dry-run", "--out", out,
                     "--set", "control.final_shot.enabled=false"])
     assert rc == 0
     assert not os.path.exists(os.path.join(out, "perfect_shot.jpg"))
-    assert not os.path.exists(os.path.join(out, "final_meta.json"))
+    meta = read_meta(out)
+    assert meta["shot"] is None and meta["verify"] is not None
 
 
 def test_quality_fail_exit_3_photo_archived(tmp_path):
@@ -151,6 +155,97 @@ def test_capture_error_exit_3_error_recorded(tmp_path):
     lines = read_jsonl(os.path.join(out, "trace.jsonl"))
     assert lines[-2]["confirmed"] is True        # 位置到位的事实不被终拍失败掩盖
     assert lines[-1]["type"] == "final_shot"
+
+
+# ========== 交接学长系统（S5 新增） ==========
+
+class FakeHandoffClient:
+    """HandoffClient 假件：记录调用，可指定失败"""
+
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.calls = []
+
+    def handoff(self, poi_key, pose, task_type, params, update_poi=True):
+        self.calls.append({"poi_key": poi_key, "pose": pose,
+                           "task_type": task_type, "params": params,
+                           "update_poi": update_poi})
+        if self.fail:
+            raise RuntimeError("学长系统没开机")
+        return {"poi_updated": bool(pose), "task_id": 7}
+
+
+def read_meta(out):
+    with open(os.path.join(out, "final_meta.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def test_handoff_runs_with_flag(tmp_path):
+    """--handoff 强制开启：交接被调用、结果进 final_meta，exit 0。"""
+    tool = make_tool()
+    client = FakeHandoffClient()
+    out = str(tmp_path / "run")
+    rc = tool.main(["--dry-run", "--out", out, "--handoff"],
+                   handoff_client=client)
+    assert rc == 0
+    assert len(client.calls) == 1
+    call = client.calls[0]
+    assert call["task_type"] == 1
+    assert call["params"] == {"floor": 4, "area": "B", "rack": 94,
+                              "side": "L", "column": 8}
+    assert call["pose"] is None                  # 干跑后端无 mover，位姿如实为空
+    meta = read_meta(out)
+    assert meta["handoff"]["task_id"] == 7
+    assert meta["handoff_error"] is None
+
+
+def test_handoff_disabled_by_default(tmp_path):
+    """默认关：交接客户端一次都不被调用。"""
+    tool = make_tool()
+    client = FakeHandoffClient()
+    out = str(tmp_path / "run")
+    rc = tool.main(["--dry-run", "--out", out], handoff_client=client)
+    assert rc == 0
+    assert client.calls == []
+    assert read_meta(out)["handoff"] is None
+
+
+def test_handoff_failure_keeps_exit_0(tmp_path):
+    """交接失败不改退出码（到位结论已成立），但错误要落账。"""
+    tool = make_tool()
+    client = FakeHandoffClient(fail=True)
+    out = str(tmp_path / "run")
+    rc = tool.main(["--dry-run", "--out", out, "--handoff"],
+                   handoff_client=client)
+    assert rc == 0
+    meta = read_meta(out)
+    assert "RuntimeError" in meta["handoff_error"]
+    lines = read_jsonl(os.path.join(out, "trace.jsonl"))
+    assert lines[-1]["type"] == "final_shot"
+    assert lines[-1]["handoff"] is None
+    assert "RuntimeError" in lines[-1]["handoff_error"]
+
+
+def test_handoff_skipped_when_quality_fails(tmp_path):
+    """确认照质检未过：先留人看，不自动交接（exit 3 且交接零调用）。"""
+    tool = make_tool()
+    client = FakeHandoffClient()
+
+    def blurry_still():
+        import numpy as np
+        h, w = 216, 384
+        smooth = np.tile(np.linspace(0, 255, w).astype(np.uint8), (h, 1))
+        frame = np.stack([smooth] * 3, axis=-1)
+        return {"frame": frame, "ok": False,
+                "metrics": {"laplacian_var": 0.0, "brightness": 127.5},
+                "attempts": 3}
+
+    out = str(tmp_path / "run")
+    rc = tool.main(["--dry-run", "--out", out], still_fn=blurry_still,
+                   handoff_client=client)
+    assert rc == 3
+    assert client.calls == []
+    assert read_meta(out)["handoff"] is None
 
 
 if __name__ == "__main__":
