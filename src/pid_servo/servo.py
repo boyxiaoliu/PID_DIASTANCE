@@ -225,6 +225,7 @@ class Iteration:
     :param out_m: 本轮下发的位移（米，正 = 后退）
     :param held: 累计连续命中容差带的轮数
     :param distance: 真实距离，仅仿真后端能提供（取自 obs.debug），用于对照
+    :param note: 留痕标注。空 = 正常闭环轮；"verify" = 收敛后的终验帧
     """
     i: int
     mode: str
@@ -234,6 +235,7 @@ class Iteration:
     out_m: float
     held: int
     distance: float = None
+    note: str = ""
 
 
 @dataclass
@@ -457,3 +459,46 @@ class DistanceServo:
                        else final_reading - self.target_frac),
             trace=trace,
         )
+
+    # ---- 收敛终验（S5 新增） ----
+
+    def run_until_confirmed(self, observe, move, on_iter=None,
+                            max_confirm_attempts=3):
+        """run_until_confirmed 跑闭环直到「收敛 且 终验帧单帧直判在带内」
+
+        循环内的收敛判据是 3 点中值滤波，有已知盲区：三帧误差取中值时，
+        最新一帧可能已出带而中值仍在带内（项目记忆 S5 注意点）。所以每次
+        收敛宣告后都要再取一帧新鲜数据做单帧终验：在带内才算真到位；
+        出带（含饱和/丢失态）就回到闭环再调，终验最多 max_confirm_attempts
+        轮，始终不达标则如实报未到位。
+
+        :param observe: 同 run
+        :param move: 同 run
+        :param on_iter: 同 run；终验帧也走此回调留痕（Iteration.note="verify"）
+        :param max_confirm_attempts: 终验尝试次数上限（每次含一轮完整闭环）
+        :return: (confirmed, result, verify_obs)
+            confirmed   是否「收敛且终验在带内」
+            result      末次闭环的 ServoResult（未收敛时即那一次的结果）
+            verify_obs  通过终验的那帧 Observation；confirmed=False 时为 None
+        """
+        result = None
+        for _ in range(max_confirm_attempts):
+            result = self.run(observe, move, on_iter=on_iter)
+            if not result.converged:
+                return False, result, None
+
+            obs = observe()
+            state, reading = classify_observation(
+                obs, self.gap_min_frac, self.spine_frac_sat, self.sat_reading)
+            ok = (state == STATE_NORMAL
+                  and reading is not None
+                  and abs(reading - self.target_frac) <= self.tol)
+            if on_iter:
+                err = None if reading is None else reading - self.target_frac
+                on_iter(Iteration(result.iters, obs.mode, state, reading,
+                                  err, 0.0, 0,
+                                  distance=obs.debug.get("d_true"),
+                                  note="verify"))
+            if ok:
+                return True, result, obs
+        return False, result, None

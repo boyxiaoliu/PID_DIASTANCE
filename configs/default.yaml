@@ -8,9 +8,9 @@
 # =============================================================================
 
 meta:
-  version: "0.2.1"
-  updated: "2026-10-21"
-  note: "步长调整版：sat/backoff 步长改小（用户'多次少量'意见），max_backoff/max_iters 连动放大；重复性档全网格 100% 验证通过（experiments/2026-10-21_步长调整/）"
+  version: "0.3.0"
+  updated: "2026-10-24"
+  note: "S5 前置版：新增收敛终验（confirm_attempts）与 4K 确认照（final_shot + camera.still/quality）；闭环步长参数不变"
 
 # -----------------------------------------------------------------------------
 # 感知层 〔线A 认领〕
@@ -108,6 +108,10 @@ control:
     fwd_limit_far_zone: 0.15   # 宽档（限幅带内但还差得远时）
     fwd_cap_err: 0.06          # 两档切换阈值（=2×tol）
     close_band: 0.11
+    confirm_attempts: 3        # 收敛终验次数上限（S5 新增）：收敛判据是 3 点中值，
+                               # 最新帧可能已出带而中值仍在带内（项目记忆 S5 注意点）；
+                               # 终验 = 收敛后重新取帧单帧直判，出带就回到闭环再调，
+                               # 连续 N 次终验不过才如实报"未到位"
 
   saturation:                # 饱和标度规则（S1 实验 README 标度表，S3 落实）
     spine_frac_sat: 0.95     # 蓝线(书底)≥此值且黄线未检出 → 判"太近"饱和
@@ -132,6 +136,10 @@ control:
     input_size: 1024         # 与学长部署一致（robot/spine_detector.py letterbox 同值）
     class_id: 0              # 0 = book 书脊（学长 metadata 同源）
 
+  final_shot:                # 确认照（S5 新增）：终验到位后按学长标准拍的高清存档，
+                             # 是闭环的验收证据；下游正式盘点由学长系统负责，本工具到此为止
+    enabled: true            # false = 只做终验不拍确认照
+
 # -----------------------------------------------------------------------------
 # 相机 / 采集 〔线B 认领，真机阶段启用〕
 # -----------------------------------------------------------------------------
@@ -144,6 +152,14 @@ camera:
   device_path: ""            # TODO(S4上板) /dev/v4l/by-path/... （学长 camera_config.yaml cam_4 同源，
                              #   插拔不串号）；留空 = 退回用 cam_id 当 /dev/videoN 索引
   settle_frames: 3           # 开流后丢弃前 N 帧（曝光未稳）
+  still_width: 3840          # 确认照（终拍）分辨率：终拍回 4K（学长 capture_group 同值）—— TODO(S4上板) 首拍核对
+  still_height: 2160
+  quality:                   # 确认照质检两道门 + 重拍节奏（阈值与学长 Camera.check_frame_quality 同源）
+    blur_min_lap: 100        # 灰度图 Laplacian 方差下限，低于 = 模糊
+    brightness_min: 40       # 亮度均值合格下界
+    brightness_max: 220      # 亮度均值合格上界
+    retries: 3               # 质检不达标重拍次数上限（含首拍）
+    retry_wait_ms: 1000      # 相邻两次重拍的间隔（学长同值）
   light:                     # 补光灯（学长 led.py 的 Modbus RTU 帧，Y1 继电器，闭环全程常亮）
     enabled: false           # TODO(S4上板) 现场核对继电器通道对应补光灯后启用
     port: "/dev/ttyCH341USB0"

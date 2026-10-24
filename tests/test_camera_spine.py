@@ -14,7 +14,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pid_servo.robot.camera import (LIGHT_FRAMES_OFF, LIGHT_FRAMES_ON,
-                                    CameraBackend, CameraError, LightController)
+                                    CameraBackend, CameraError, LightController,
+                                    check_frame_quality)
 from pid_servo.robot.spine_detector import (RknnSpineDetector, boxes_to_spine_stats,
                                             decode_obb_raw, letterbox)
 
@@ -212,3 +213,80 @@ def test_from_config_reads_nodes():
            "perception": {"spine": {"min_confidence": 0.5, "max_boxes": 20}}}
     det = RknnSpineDetector.from_config(cfg, runtime=object())
     assert det.model_path == "m.rknn" and det.min_confidence == 0.5
+
+
+# ========== 确认照质检与终拍（S5 新增，阈值与学长 Camera.check_frame_quality 同源） ==========
+
+def test_quality_passes_textured_frame():
+    """带纹理的帧（噪声 = 高频）应过两道门。"""
+    rng = np.random.default_rng(0)
+    frame = rng.integers(0, 256, (216, 384, 3), dtype=np.uint8)
+    ok, m = check_frame_quality(frame)
+    assert ok
+    assert m["laplacian_var"] > 100
+    assert 40 <= m["brightness"] <= 220
+
+
+def test_quality_rejects_blur_dark_bright():
+    """模糊（无高频）/过暗/过曝 三种失败形态都要被拦下。"""
+    h, w = 216, 384
+    smooth = np.tile(np.linspace(0, 255, w).astype(np.uint8), (h, 1))
+    blur = np.stack([smooth] * 3, axis=-1)          # 平滑渐变 = 无高频
+    ok, m = check_frame_quality(blur)
+    assert not ok and m["laplacian_var"] < 100
+
+    dark = np.zeros((h, w, 3), dtype=np.uint8)
+    ok, m = check_frame_quality(dark)
+    assert not ok and m["brightness"] < 40
+
+    bright = np.full((h, w, 3), 255, dtype=np.uint8)
+    ok, m = check_frame_quality(bright)
+    assert not ok and m["brightness"] > 220
+
+
+def test_capture_still_reopens_at_still_size_and_manages_light():
+    """终拍要释放预览流、按指定分辨率重开、灯"再开→拍完关"，且之后 close() 幂等。"""
+    cam, made = make_camera()
+    cam.start()
+    preview_cap = made["cap"]
+    shot = cam.capture_still(3840, 2160, quality_cfg={
+        "blur_min_lap": 0, "brightness_min": 0, "brightness_max": 255,
+        "retries": 1, "retry_wait_ms": 0})
+    assert preview_cap.released                          # 预览流让出设备
+    assert made["args"][2] == 3840 and made["args"][3] == 2160   # 重开 4K（宽, 高）
+    assert shot["ok"] and shot["attempts"] == 1
+    assert shot["frame"] is not None
+    assert made["cap"].reads == 3 + 1                    # settle 3 帧 + 1 次拍摄
+    assert cam.light.events == ["on", "on", "off"]       # start 常亮 → 终拍再开 → 拍完关
+    cam.close()                                          # 终拍后 close() 是幂等空操作
+    assert cam.light.events == ["on", "on", "off"]
+
+
+def test_capture_still_retries_and_returns_best_frame():
+    """质检连败：重拍 retries 次，返回最清晰的一帧兜底且 ok=False。"""
+    cam, made = make_camera()
+    cam.start()
+    shot = cam.capture_still(960, 540, quality_cfg={
+        "blur_min_lap": 1e9, "brightness_min": 0, "brightness_max": 255,
+        "retries": 3, "retry_wait_ms": 0})
+    assert not shot["ok"]
+    assert shot["frame"] is not None
+    assert shot["attempts"] == 3
+    assert "laplacian_var" in shot["metrics"]
+    assert made["cap"].reads == 3 + 3                    # settle + 3 次尝试
+
+
+def test_capture_still_open_failure_turns_light_off():
+    """终拍流打不开：报 CameraError，且失败前把灯关掉（不带病运行）。"""
+    calls = {"n": 0}
+
+    def factory(device, fourcc, width, height, fps):
+        calls["n"] += 1
+        return FakeCapture(opened=(calls["n"] == 1))     # 第二次（终拍）打不开
+
+    cam = CameraBackend(factory, device_path="d", cam_id="4",
+                        settle_frames=3, light=FakeLight())
+    cam.start()
+    with pytest.raises(CameraError, match="终拍打开失败"):
+        cam.capture_still(3840, 2160, quality_cfg={"retries": 1, "retry_wait_ms": 0})
+    assert cam.light.events == ["on", "on", "off"]

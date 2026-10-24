@@ -147,7 +147,11 @@ def read_jsonl(path):
 
 
 def test_dry_run_end_to_end(cli, tmp_path):
-    """干跑整链：闭环收敛 + trace.jsonl 结构完整（meta/iter/result）+ 逐轮耗时字段在"""
+    """干跑整链：闭环收敛 + 终验到位 + trace.jsonl 结构完整（meta/iter/result）+ 耗时字段在
+
+    S5 起 trace 的 iter 行含终验帧（note="verify"），且终验出带会回环再调，
+    所以 iter 行数 ≥ 末次闭环的 result.iters。
+    """
     out = str(tmp_path / "run")
     rc = cli.main(["--dry-run", "--d0", "0.9", "--d-star", "1.5",
                    "--noise-mult", "1", "--seed", "0", "--out", out])
@@ -159,11 +163,17 @@ def test_dry_run_end_to_end(cli, tmp_path):
     result = [ln for ln in lines if ln["type"] == "result"][0]
 
     assert result["converged"] is True and result["reason"] == "converged"
-    assert len(iters) == result["iters"] >= 1
+    assert result["confirmed"] is True
+    loop_iters = [ln for ln in iters if ln.get("note") != "verify"]
+    verifies = [ln for ln in iters if ln.get("note") == "verify"]
+    assert len(loop_iters) >= result["iters"] >= 1   # 终验出带回环时行数更多
+    assert len(verifies) >= 1                        # 终验帧必须留痕
     for ln in iters:
-        assert {"i", "mode", "state", "reading", "err", "out_m", "held"} <= set(ln)
+        assert {"i", "mode", "state", "reading", "err", "out_m", "held",
+                "note"} <= set(ln)
         assert ln["total_ms"] is None          # 干跑无相机段，耗时如实为空
-    assert iters[-1]["held"] >= 1
+    assert abs(verifies[-1]["err"]) <= 0.030   # 通过终验：单帧直判在带内
+    assert loop_iters[-1]["held"] >= 1
 
 
 def test_dry_run_saturation_path_backs_off(cli, tmp_path):

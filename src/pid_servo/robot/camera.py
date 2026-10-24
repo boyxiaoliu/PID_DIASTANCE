@@ -88,6 +88,28 @@ def _cv_capture_factory(device, fourcc, width, height, fps):
     return cap
 
 
+def check_frame_quality(frame, blur_min_lap=100.0, brightness_min=40.0,
+                        brightness_max=220.0):
+    """check_frame_quality 确认照质检两道门：清晰度与亮度
+
+    阈值标准与学长 Camera.check_frame_quality 同源（configs camera.quality 节）：
+    模糊帧（Laplacian 方差低）与过暗/过曝帧不许当"完美照片"出库。
+
+    :param frame: BGR 帧（numpy 数组）
+    :param blur_min_lap: 灰度图 Laplacian 方差下限，低于 = 模糊
+    :param brightness_min: 亮度均值合格下界
+    :param brightness_max: 亮度均值合格上界
+    :return: (ok, metrics)；metrics = {"laplacian_var", "brightness"}（保留 1 位小数）
+    """
+    import cv2  # 惰性：与模块其余部分一致
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    lap = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    bright = float(gray.mean())
+    ok = lap >= blur_min_lap and brightness_min <= bright <= brightness_max
+    return ok, {"laplacian_var": round(lap, 1), "brightness": round(bright, 1)}
+
+
 class CameraBackend:
     """CameraBackend 单路预览流：start() 开流丢帧，read() 取一帧，close() 关流关灯
 
@@ -160,3 +182,65 @@ class CameraBackend:
         if release:
             release()
         self._cap = None
+
+    def capture_still(self, width, height, quality_cfg=None):
+        """capture_still 终拍确认照：关预览流 → 补光灯常亮 → 重开高分辨率流 → 质检取帧
+
+        节奏参照学长 capture_group：开流后丢 settle 帧等曝光稳，拍一帧过
+        质检（清晰度/亮度），不达标等 retry_wait_ms 再拍，最多 retries 次；
+        全不合格时返回得分最高（最清晰）的一帧并 ok=False，交人工判断。
+        返回后预览流保持关闭、补光灯关闭（终拍是流程最后一环），
+        之后的 close() 是幂等空操作。
+
+        :param width/height: 终拍分辨率（configs camera.still_width/still_height）
+        :param quality_cfg: configs camera.quality 节（阈值与重拍节奏）；None 用内置默认
+        :return: {"frame": 帧或 None, "ok": 是否质检通过,
+                  "metrics": 质检指标, "attempts": 实际拍摄次数}
+        :raises CameraError: 终拍流打不开（失败前会把灯关掉）
+        """
+        q = quality_cfg or {}
+        blur_min = float(q.get("blur_min_lap", 100.0))
+        b_min = float(q.get("brightness_min", 40.0))
+        b_max = float(q.get("brightness_max", 220.0))
+        retries = int(q.get("retries", 3))
+        wait_s = float(q.get("retry_wait_ms", 1000)) / 1000.0
+
+        if self._cap is not None:               # 释放预览流让出设备，灯保持常亮
+            release = getattr(self._cap, "release", None)
+            if release:
+                release()
+            self._cap = None
+        self.light.on()
+
+        cap = self._factory(self.device, self.fourcc, width, height, self.fps)
+        if not getattr(cap, "isOpened", lambda: True)():
+            self.light.off()
+            raise CameraError(f"终拍打开失败: {self.device!r} @{width}x{height}")
+
+        result = {"frame": None, "ok": False, "metrics": {}, "attempts": 0}
+        best, best_lap = None, -1.0
+        try:
+            for _ in range(self.settle_frames):     # 曝光未稳的帧照旧丢弃
+                cap.read()
+            for i in range(retries):
+                got, frame = cap.read()
+                result["attempts"] = i + 1
+                if not got:
+                    time.sleep(wait_s)
+                    continue
+                passed, metrics = check_frame_quality(frame, blur_min, b_min, b_max)
+                if passed:
+                    result.update(frame=frame, ok=True, metrics=metrics)
+                    return result
+                if metrics["laplacian_var"] > best_lap:   # 兜底：留最清晰的一帧
+                    best, best_lap = frame, metrics["laplacian_var"]
+                    result["metrics"] = metrics
+                time.sleep(wait_s)
+        finally:
+            release = getattr(cap, "release", None)
+            if release:
+                release()
+            self.light.off()
+        if best is not None:
+            result["frame"] = best
+        return result

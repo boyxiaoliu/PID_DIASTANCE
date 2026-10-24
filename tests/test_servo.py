@@ -203,6 +203,78 @@ def test_saturated_never_forward_after_integral_windup():
     assert moves[-1] == 0.20                  # 饱和轮固定步后退，方向为正
 
 
+# ========== 终验（run_until_confirmed，S5 新增） ==========
+
+def test_confirmed_when_verify_frame_in_band():
+    """收敛后终验帧在带内 → 确认到位，且终验本身不产生新运动。"""
+    servo = _servo(hold_frames=2)
+    moves = []
+    confirmed, result, obs = servo.run_until_confirmed(
+        lambda: _obs(bar_frac=TARGET + 0.001), moves.append)
+    assert confirmed and result.converged
+    assert abs(obs.bar_frac - TARGET) <= 0.03
+    assert moves == [0.0]          # 只有收敛前那一轮的死区零指令，终验不出指令
+
+
+def test_verify_out_of_band_reenters_loop():
+    """终验帧出带（中值盲区场景）→ 回到闭环再调，第二次终验通过。"""
+    seq = [_obs(bar_frac=0.956), _obs(bar_frac=0.956),   # 第一次闭环：两轮收敛
+           _obs(bar_frac=0.86),                          # 终验帧 err=-0.095 出带 → 回环
+           _obs(bar_frac=0.956), _obs(bar_frac=0.956),   # 第二次闭环收敛
+           _obs(bar_frac=0.950)]                         # 第二次终验：在带内
+    notes = []
+    moves = []
+    servo = _servo(hold_frames=2, max_iters=5)
+    confirmed, result, obs = servo.run_until_confirmed(
+        lambda: seq.pop(0), moves.append,
+        on_iter=lambda it: notes.append(it.note))
+    assert confirmed and abs(obs.bar_frac - TARGET) <= 0.03
+    assert len(moves) == 2         # 两次闭环各一轮零指令，终验不出指令
+    assert notes[0] == ""          # 闭环轮无标注
+    assert notes[-1] == "verify"   # 终验帧带 verify 标注进留痕
+
+
+def test_verify_lost_frame_reenters_loop():
+    """终验帧黄蓝全无（丢失态）→ 不算到位，回到闭环再调。"""
+    seq = [_obs(bar_frac=0.956), _obs(bar_frac=0.956),
+           _obs(),                 # 终验帧丢失
+           _obs(bar_frac=0.956), _obs(bar_frac=0.956),
+           _obs(bar_frac=0.950)]
+    servo = _servo(hold_frames=2, max_iters=5)
+    confirmed, _, obs = servo.run_until_confirmed(
+        lambda: seq.pop(0), lambda d: None)
+    assert confirmed and abs(obs.bar_frac - TARGET) <= 0.03
+
+
+def test_confirm_attempts_exhausted_reports_not_confirmed():
+    """终验连续出带耗尽次数 → 如实报未到位。"""
+    seq = ([_obs(bar_frac=0.956)] * 2 + [_obs(bar_frac=0.86)]) * 2
+    servo = _servo(hold_frames=2, max_iters=5)
+    confirmed, _, obs = servo.run_until_confirmed(
+        lambda: seq.pop(0), lambda d: None, max_confirm_attempts=2)
+    assert not confirmed and obs is None
+
+
+def test_never_converges_reports_not_confirmed():
+    """闭环始终未收敛 → 如实报未到位，无终验帧。"""
+    servo = _servo(max_iters=3, max_backoff=2)
+    confirmed, result, obs = servo.run_until_confirmed(
+        lambda: _obs(), lambda d: None, max_confirm_attempts=2)
+    assert not confirmed and obs is None
+    assert not result.converged
+
+
+def test_confirmed_on_shelf_sim():
+    """接合成书架的完整"闭环+终验"应确认到位（验证接线）。"""
+    servo = _servo(max_iters=20)
+    sim = ShelfSim(d_star=1.5, d0=2.8, target=TARGET, noise_std=0.01, seed=1)
+    confirmed, result, obs = servo.run_until_confirmed(
+        sim.observe, sim.move)
+    assert confirmed and result.converged
+    assert abs(sim.distance - 1.5) < 0.15
+    assert abs(obs.bar_frac - TARGET) <= servo.tol
+
+
 # ========== 接线 ==========
 
 def test_converges_on_shelf_sim():
